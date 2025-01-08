@@ -1,29 +1,13 @@
 # app.py
 import streamlit as st
 import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
 import numpy as np
-from io import StringIO
+import matplotlib.pyplot as plt
 import seaborn as sns
 from pathlib import Path
-import matplotlib.pyplot as plt
-from wordcloud import WordCloud
 
 # Set page config
 st.set_page_config(page_title="Pharma Industry Analysis", layout="wide")
-
-# Custom CSS
-st.markdown("""
-    <style>
-    .main {
-        padding: 0rem 1rem;
-    }
-    .stPlotlyChart {
-        width: 100%;
-    }
-    </style>
-    """, unsafe_allow_html=True)
 
 class DataAnalyzer:
     def __init__(self, df):
@@ -41,58 +25,43 @@ class DataAnalyzer:
         list_columns = ['Product Categories', 'Health Segments', 'Certifications', 
                        'Target Audience', 'Innovation/Research Areas']
         for col in list_columns:
-            self.df[f'{col}_List'] = self.df[col].str.split(',')
+            if col in self.df.columns:
+                self.df[f'{col}_List'] = self.df[col].str.split(',')
     
     def calculate_company_scores(self):
-        # Calculate various scores for companies
         scores = pd.DataFrame()
         scores['Company'] = self.df['Company Name']
         
-        # Certification Score (based on number of certifications)
-        scores['Certification_Score'] = self.df['Certifications'].str.count(',') + 1
+        # Calculate various scores
+        if 'Certifications' in self.df.columns:
+            scores['Certification_Score'] = self.df['Certifications'].str.count(',') + 1
         
-        # Market Presence Score
         scores['Market_Presence'] = self.df['Geographical Presence'].apply(
             lambda x: 10 if 'Global' in x else 5)
         
-        # Innovation Score
-        scores['Innovation_Score'] = self.df['Innovation/Research Areas'].str.count(',') + 1
+        if 'Innovation/Research Areas' in self.df.columns:
+            scores['Innovation_Score'] = self.df['Innovation/Research Areas'].str.count(',') + 1
         
-        # Product Diversity Score
         scores['Product_Diversity'] = self.df['Product Categories'].str.count(',') + 1
         
-        # Total Score
-        scores['Total_Score'] = (scores['Certification_Score'] + 
-                               scores['Market_Presence'] + 
-                               scores['Innovation_Score'] + 
-                               scores['Product_Diversity'])
-        
+        scores['Total_Score'] = scores.select_dtypes(include=[np.number]).sum(axis=1)
         return scores
-    
-    def generate_competitor_analysis(self):
-        competitor_data = []
-        for _, row in self.df.iterrows():
-            if row['Competitors']:
-                competitors = [comp.strip() for comp in row['Competitors'].split(',')]
-                for comp in competitors:
-                    competitor_data.append({
-                        'Company': row['Company Name'],
-                        'Competitor': comp,
-                        'Industry': row['Company Type']
-                    })
-        return pd.DataFrame(competitor_data)
     
     def analyze_market_segments(self):
         segments = {}
-        for _, row in self.df.iterrows():
-            if row['Health Segments']:
-                for segment in row['Health Segments'].split(','):
-                    segment = segment.strip()
-                    if segment in segments:
-                        segments[segment] += 1
-                    else:
-                        segments[segment] = 1
+        if 'Health Segments' in self.df.columns:
+            for _, row in self.df.iterrows():
+                if pd.notna(row['Health Segments']):
+                    for segment in row['Health Segments'].split(','):
+                        segment = segment.strip()
+                        segments[segment] = segments.get(segment, 0) + 1
         return pd.DataFrame(list(segments.items()), columns=['Segment', 'Count'])
+
+def create_matplotlib_figure(figure_func):
+    fig, ax = plt.subplots(figsize=(10, 6))
+    figure_func(ax)
+    plt.tight_layout()
+    return fig
 
 def create_visualizations(analyzer):
     st.title("Pharmaceutical Industry Analysis Dashboard")
@@ -108,66 +77,96 @@ def create_visualizations(analyzer):
     # Filter data
     filtered_df = analyzer.df[analyzer.df['Company Type'].isin(company_type)]
     
-    # Main dashboard
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.subheader("Company Type Distribution")
-        fig = px.pie(filtered_df, names='Company Type', title='Company Distribution by Type')
-        st.plotly_chart(fig, use_container_width=True)
-        
-    with col2:
-        st.subheader("Manufacturing Capabilities")
-        manufacturing_data = filtered_df[['Manufacturer_Binary', 'Brand_Binary', 'Distributor_Binary']].sum()
-        fig = px.bar(manufacturing_data, title='Manufacturing & Distribution Capabilities')
-        st.plotly_chart(fig, use_container_width=True)
-    
-    # Market Analysis
-    st.header("Market Analysis")
-    col3, col4 = st.columns(2)
-    
-    with col3:
-        # Geographic Presence
-        presence_data = filtered_df['Geographical Presence'].value_counts()
-        fig = px.bar(presence_data, title='Geographic Presence Distribution')
-        st.plotly_chart(fig, use_container_width=True)
-    
-    with col4:
-        # Health Segments Analysis
-        segments = analyzer.analyze_market_segments()
-        fig = px.treemap(segments, path=['Segment'], values='Count', 
-                        title='Health Segments Distribution')
-        st.plotly_chart(fig, use_container_width=True)
-    
-    # Company Scores
-    st.header("Company Performance Metrics")
-    scores = analyzer.calculate_company_scores()
-    fig = px.scatter(scores, x='Market_Presence', y='Innovation_Score',
-                    size='Product_Diversity', hover_data=['Company'],
-                    title='Company Performance Matrix')
-    st.plotly_chart(fig, use_container_width=True)
-    
-    # Competitor Analysis
-    st.header("Competitor Analysis")
-    competitor_df = analyzer.generate_competitor_analysis()
-    fig = px.network(competitor_df, title='Competitor Network')
-    st.plotly_chart(fig, use_container_width=True)
-    
-    # Innovation Areas WordCloud
-    st.header("Innovation Focus Areas")
-    innovation_text = ' '.join(filtered_df['Innovation/Research Areas'].dropna())
-    wordcloud = WordCloud(width=800, height=400, background_color='white').generate(innovation_text)
-    
-    fig, ax = plt.subplots()
-    ax.imshow(wordcloud, interpolation='bilinear')
-    ax.axis('off')
+    # Company Type Distribution
+    st.subheader("Company Type Distribution")
+    fig = create_matplotlib_figure(lambda ax: 
+        sns.countplot(data=filtered_df, x='Company Type', ax=ax)
+    )
+    plt.xticks(rotation=45)
     st.pyplot(fig)
+    
+    # Manufacturing Capabilities
+    st.subheader("Manufacturing Capabilities")
+    manufacturing_cols = ['Manufacturer_Binary', 'Brand_Binary', 'Distributor_Binary']
+    manufacturing_data = filtered_df[manufacturing_cols].sum()
+    fig = create_matplotlib_figure(lambda ax: 
+        manufacturing_data.plot(kind='bar', ax=ax)
+    )
+    plt.xticks(rotation=45)
+    st.pyplot(fig)
+    
+    # Geographic Presence
+    st.subheader("Geographic Presence")
+    presence_data = filtered_df['Geographical Presence'].value_counts()
+    fig = create_matplotlib_figure(lambda ax: 
+        presence_data.plot(kind='barh', ax=ax)
+    )
+    st.pyplot(fig)
+    
+    # Health Segments Analysis
+    st.subheader("Health Segments Distribution")
+    segments = analyzer.analyze_market_segments()
+    if not segments.empty:
+        fig = create_matplotlib_figure(lambda ax: 
+            sns.barplot(data=segments, x='Count', y='Segment', ax=ax)
+        )
+        st.pyplot(fig)
+    
+    # Company Performance Metrics
+    st.subheader("Company Performance Analysis")
+    scores = analyzer.calculate_company_scores()
+    fig = create_matplotlib_figure(lambda ax: 
+        sns.scatterplot(data=scores, x='Market_Presence', y='Innovation_Score', 
+                       size='Product_Diversity', ax=ax)
+    )
+    plt.xticks(rotation=45)
+    st.pyplot(fig)
+    
+    # Top Companies Analysis
+    st.subheader("Top Companies by Total Score")
+    top_companies = scores.nlargest(10, 'Total_Score')
+    fig = create_matplotlib_figure(lambda ax: 
+        sns.barplot(data=top_companies, x='Total_Score', y='Company', ax=ax)
+    )
+    st.pyplot(fig)
+    
+    # Product Categories Analysis
+    st.subheader("Product Categories Distribution")
+    product_cats = filtered_df['Product Categories'].str.split(',').explode().value_counts()
+    fig = create_matplotlib_figure(lambda ax: 
+        product_cats.head(10).plot(kind='barh', ax=ax)
+    )
+    st.pyplot(fig)
+    
+    # Detailed Analysis Tables
+    st.header("Detailed Analysis")
+    
+    # Company Scores Table
+    st.subheader("Company Scores")
+    st.dataframe(scores)
+    
+    # Summary Statistics
+    st.subheader("Summary Statistics")
+    summary_stats = pd.DataFrame({
+        'Total Companies': len(filtered_df),
+        'Manufacturers': filtered_df['Manufacturer_Binary'].sum(),
+        'Brands': filtered_df['Brand_Binary'].sum(),
+        'Distributors': filtered_df['Distributor_Binary'].sum(),
+    }, index=[0])
+    st.dataframe(summary_stats)
     
     # Download Section
     st.header("Download Analysis")
-    csv = filtered_df.to_csv(index=False)
+    
+    # Prepare download data
+    download_df = pd.concat([
+        filtered_df,
+        scores.set_index('Company')
+    ], axis=1)
+    
+    csv = download_df.to_csv(index=False)
     st.download_button(
-        label="Download Data as CSV",
+        label="Download Analysis as CSV",
         data=csv,
         file_name="pharma_analysis.csv",
         mime="text/csv",
